@@ -5,7 +5,7 @@ use anchor_spl::token_interface::{
     TransferChecked,
 };
 
-declare_id!("3T5TjDgMGppPwW3K7waUUuipSveiBSrWBKi957TEirH6");
+declare_id!("CoiQFqwmZU6KYq6BjMMz3yw9sgb5L8ngusPgtRXGRHi8");
 
 // ---------------------------------------------------------------------------
 // Constants
