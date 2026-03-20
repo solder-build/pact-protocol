@@ -1,6 +1,7 @@
 {
   "license": "ISC",
   "scripts": {
+    "demo": "npx ts-node scripts/demo.ts",
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check"
   },
