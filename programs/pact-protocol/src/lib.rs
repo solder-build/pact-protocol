@@ -1,5 +1,10 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::program::invoke;
+use anchor_lang::solana_program::program::invoke_signed;
+use anchor_lang::solana_program::system_instruction;
 use anchor_spl::associated_token::AssociatedToken;
+use anchor_spl::token_2022::Token2022;
+use anchor_spl::token_2022::spl_token_2022;
 use anchor_spl::token_interface::{
     close_account, transfer_checked, CloseAccount, Mint, TokenAccount, TokenInterface,
     TransferChecked,
@@ -16,18 +21,6 @@ const HASH_LEN: usize = 32;
 const MAX_MEMO_LEN: usize = 128;
 const MIN_EXPIRY_SECONDS: i64 = 3_600; // 1 hour
 const MAX_EXPIRY_SECONDS: i64 = 365 * 24 * 3_600; // 1 year
-
-macro_rules! pact_seeds {
-    ($pact:expr) => {
-        &[
-            b"pact".as_ref(),
-            $pact.issuer.as_ref(),
-            $pact.beneficiary.as_ref(),
-            $pact.terms_hash.as_ref(),
-            &[$pact.bump],
-        ]
-    };
-}
 
 // ---------------------------------------------------------------------------
 // Program
@@ -73,6 +66,7 @@ pub mod pact_protocol {
         pact.reasoning_hash = [0u8; HASH_LEN];
         pact.bump = ctx.bumps.pact;
         pact.vault_bump = ctx.bumps.vault;
+        pact.pact_mint = Pubkey::default();
 
         let mut memo_buf = [0u8; MAX_MEMO_LEN];
         memo_buf[..memo.len()].copy_from_slice(&memo);
@@ -450,6 +444,292 @@ pub mod pact_protocol {
 
         Ok(())
     }
+
+    // =========================================================================
+    // Token-2022 Pact Mint — Tokenized Settlement Obligation
+    // =========================================================================
+
+    /// Create a Token-2022 mint representing this Pact as a tokenized settlement
+    /// obligation. The mint is created with Default Frozen state (cannot be
+    /// transferred until settled) and Permanent Delegate (issuer can burn for
+    /// sanctions/recall). Mints 1 token to the beneficiary.
+    pub fn create_pact_mint(ctx: Context<CreatePactMint>) -> Result<()> {
+        use spl_token_2022::extension::ExtensionType;
+        use spl_token_2022::state::AccountState;
+
+        // Extract all needed values before mutable borrow
+        let current_mint = ctx.accounts.pact.pact_mint;
+        require!(current_mint == Pubkey::default(), PactError::MintAlreadyCreated);
+
+        let pact_key = ctx.accounts.pact.key();
+        let issuer_key = ctx.accounts.pact.issuer;
+        let beneficiary_key = ctx.accounts.pact.beneficiary;
+        let terms_hash = ctx.accounts.pact.terms_hash;
+        let bump = ctx.accounts.pact.bump;
+
+        let seeds: &[&[u8]] = &[
+            b"pact",
+            issuer_key.as_ref(),
+            beneficiary_key.as_ref(),
+            terms_hash.as_ref(),
+            &[bump],
+        ];
+
+        // 1. Calculate mint account size with extensions
+        let extension_types = &[
+            ExtensionType::DefaultAccountState,
+            ExtensionType::PermanentDelegate,
+        ];
+        let space = ExtensionType::try_calculate_account_len::<spl_token_2022::state::Mint>(
+            extension_types,
+        )
+        .map_err(|_| PactError::MintCreationFailed)?;
+
+        let rent = Rent::get()?;
+        let lamports = rent.minimum_balance(space);
+
+        // 2. Create account owned by Token-2022 program
+        invoke(
+            &system_instruction::create_account(
+                &ctx.accounts.issuer.key(),
+                &ctx.accounts.pact_mint.key(),
+                lamports,
+                space as u64,
+                &spl_token_2022::id(),
+            ),
+            &[
+                ctx.accounts.issuer.to_account_info(),
+                ctx.accounts.pact_mint.to_account_info(),
+            ],
+        )?;
+
+        // 3. Initialize DefaultAccountState extension — ALL token accounts frozen
+        invoke(
+            &spl_token_2022::extension::default_account_state::instruction::initialize_default_account_state(
+                &spl_token_2022::id(),
+                &ctx.accounts.pact_mint.key(),
+                &AccountState::Frozen,
+            )?,
+            &[ctx.accounts.pact_mint.to_account_info()],
+        )?;
+
+        // 4. Initialize PermanentDelegate — issuer can burn/transfer any token
+        invoke(
+            &spl_token_2022::instruction::initialize_permanent_delegate(
+                &spl_token_2022::id(),
+                &ctx.accounts.pact_mint.key(),
+                &issuer_key,
+            )?,
+            &[ctx.accounts.pact_mint.to_account_info()],
+        )?;
+
+        // 5. Initialize mint (Pact PDA = authority, 0 decimals = NFT-like)
+        invoke(
+            &spl_token_2022::instruction::initialize_mint2(
+                &spl_token_2022::id(),
+                &ctx.accounts.pact_mint.key(),
+                &pact_key,          // mint authority
+                Some(&pact_key),    // freeze authority
+                0,                  // decimals
+            )?,
+            &[ctx.accounts.pact_mint.to_account_info()],
+        )?;
+
+        // 6. Create ATA for beneficiary (Token-2022)
+        //    Must happen after mint init since Token-2022 needs the mint to exist
+        //    for DefaultAccountState extension to apply.
+        let create_ata_ix = anchor_lang::solana_program::instruction::Instruction {
+            program_id: anchor_spl::associated_token::ID,
+            accounts: vec![
+                anchor_lang::solana_program::instruction::AccountMeta::new(ctx.accounts.issuer.key(), true),
+                anchor_lang::solana_program::instruction::AccountMeta::new(ctx.accounts.beneficiary_pact_token.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(beneficiary_key, false),
+                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(ctx.accounts.pact_mint.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(anchor_lang::solana_program::system_program::id(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(spl_token_2022::id(), false),
+            ],
+            data: vec![1], // CreateIdempotent variant
+        };
+        invoke(
+            &create_ata_ix,
+            &[
+                ctx.accounts.issuer.to_account_info(),
+                ctx.accounts.beneficiary_pact_token.to_account_info(),
+                ctx.accounts.beneficiary.to_account_info(),
+                ctx.accounts.pact_mint.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+                ctx.accounts.token_2022_program.to_account_info(),
+            ],
+        )?;
+
+        // 7. Thaw the beneficiary's token account (created frozen by DefaultAccountState)
+        //    mint_to requires the account to be thawed in Token-2022
+        invoke_signed(
+            &spl_token_2022::instruction::thaw_account(
+                &spl_token_2022::id(),
+                &ctx.accounts.beneficiary_pact_token.key(),
+                &ctx.accounts.pact_mint.key(),
+                &pact_key, // freeze authority = Pact PDA
+                &[],
+            )?,
+            &[
+                ctx.accounts.beneficiary_pact_token.to_account_info(),
+                ctx.accounts.pact_mint.to_account_info(),
+                ctx.accounts.pact.to_account_info(),
+            ],
+            &[seeds],
+        )?;
+
+        // 8. Mint 1 Pact token to beneficiary
+        invoke_signed(
+            &spl_token_2022::instruction::mint_to(
+                &spl_token_2022::id(),
+                &ctx.accounts.pact_mint.key(),
+                &ctx.accounts.beneficiary_pact_token.key(),
+                &pact_key,
+                &[],
+                1,
+            )?,
+            &[
+                ctx.accounts.pact_mint.to_account_info(),
+                ctx.accounts.beneficiary_pact_token.to_account_info(),
+                ctx.accounts.pact.to_account_info(),
+            ],
+            &[seeds],
+        )?;
+
+        // 9. Re-freeze the token account — Pact token stays frozen until settlement
+        invoke_signed(
+            &spl_token_2022::instruction::freeze_account(
+                &spl_token_2022::id(),
+                &ctx.accounts.beneficiary_pact_token.key(),
+                &ctx.accounts.pact_mint.key(),
+                &pact_key, // freeze authority = Pact PDA
+                &[],
+            )?,
+            &[
+                ctx.accounts.beneficiary_pact_token.to_account_info(),
+                ctx.accounts.pact_mint.to_account_info(),
+                ctx.accounts.pact.to_account_info(),
+            ],
+            &[seeds],
+        )?;
+
+        // 10. Store mint reference in Pact
+        let pact = &mut ctx.accounts.pact;
+        pact.pact_mint = ctx.accounts.pact_mint.key();
+
+        emit!(PactMintCreatedEvent {
+            pact: pact_key,
+            pact_mint: ctx.accounts.pact_mint.key(),
+            beneficiary: beneficiary_key,
+        });
+
+        Ok(())
+    }
+
+    /// Thaw the beneficiary's Pact token after settlement.
+    /// This makes the settlement claim transferable — the beneficiary now holds
+    /// a liquid, on-chain proof of completed settlement.
+    pub fn thaw_pact_token(ctx: Context<ThawPactToken>) -> Result<()> {
+        let pact_key = ctx.accounts.pact.key();
+        let issuer_key = ctx.accounts.pact.issuer;
+        let beneficiary_key = ctx.accounts.pact.beneficiary;
+        let terms_hash = ctx.accounts.pact.terms_hash;
+        let bump = ctx.accounts.pact.bump;
+
+        let seeds: &[&[u8]] = &[
+            b"pact",
+            issuer_key.as_ref(),
+            beneficiary_key.as_ref(),
+            terms_hash.as_ref(),
+            &[bump],
+        ];
+
+        invoke_signed(
+            &spl_token_2022::instruction::thaw_account(
+                &spl_token_2022::id(),
+                &ctx.accounts.beneficiary_pact_token.key(),
+                &ctx.accounts.pact_mint_account.key(),
+                &pact_key,
+                &[],
+            )?,
+            &[
+                ctx.accounts.beneficiary_pact_token.to_account_info(),
+                ctx.accounts.pact_mint_account.to_account_info(),
+                ctx.accounts.pact.to_account_info(),
+            ],
+            &[seeds],
+        )?;
+
+        emit!(PactTokenThawedEvent {
+            pact: pact_key,
+            beneficiary: beneficiary_key,
+        });
+
+        Ok(())
+    }
+
+    /// Burn the Pact token via permanent delegate authority.
+    /// Used after force-recall or dispute resolution — the settlement claim
+    /// is destroyed, matching the collateral return.
+    pub fn burn_pact_token(ctx: Context<BurnPactToken>) -> Result<()> {
+        let pact_key = ctx.accounts.pact.key();
+        let issuer_key = ctx.accounts.pact.issuer;
+        let beneficiary_key = ctx.accounts.pact.beneficiary;
+        let terms_hash = ctx.accounts.pact.terms_hash;
+        let bump = ctx.accounts.pact.bump;
+
+        let seeds: &[&[u8]] = &[
+            b"pact",
+            issuer_key.as_ref(),
+            beneficiary_key.as_ref(),
+            terms_hash.as_ref(),
+            &[bump],
+        ];
+
+        // Thaw the account first (burn requires unfrozen account in Token-2022)
+        invoke_signed(
+            &spl_token_2022::instruction::thaw_account(
+                &spl_token_2022::id(),
+                &ctx.accounts.beneficiary_pact_token.key(),
+                &ctx.accounts.pact_mint_account.key(),
+                &pact_key, // freeze authority = Pact PDA
+                &[],
+            )?,
+            &[
+                ctx.accounts.beneficiary_pact_token.to_account_info(),
+                ctx.accounts.pact_mint_account.to_account_info(),
+                ctx.accounts.pact.to_account_info(),
+            ],
+            &[seeds],
+        )?;
+
+        // Burn via permanent delegate
+        invoke(
+            &spl_token_2022::instruction::burn_checked(
+                &spl_token_2022::id(),
+                &ctx.accounts.beneficiary_pact_token.key(),
+                &ctx.accounts.pact_mint_account.key(),
+                &ctx.accounts.delegate.key(),
+                &[],
+                1,
+                0,
+            )?,
+            &[
+                ctx.accounts.beneficiary_pact_token.to_account_info(),
+                ctx.accounts.pact_mint_account.to_account_info(),
+                ctx.accounts.delegate.to_account_info(),
+            ],
+        )?;
+
+        emit!(PactTokenBurnedEvent {
+            pact: pact_key,
+            burned_by: ctx.accounts.delegate.key(),
+        });
+
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -696,6 +976,95 @@ pub struct ExpirePact<'info> {
 }
 
 // ---------------------------------------------------------------------------
+// Token-2022 Pact Mint Account Contexts
+// ---------------------------------------------------------------------------
+
+#[derive(Accounts)]
+pub struct CreatePactMint<'info> {
+    #[account(mut)]
+    pub issuer: Signer<'info>,
+
+    #[account(
+        mut,
+        has_one = issuer,
+        constraint = pact.status == PactStatus::Active @ PactError::InvalidStatus,
+        constraint = pact.pact_mint == Pubkey::default() @ PactError::MintAlreadyCreated,
+    )]
+    pub pact: Account<'info, Pact>,
+
+    /// New keypair that becomes the Token-2022 Pact mint.
+    #[account(mut)]
+    pub pact_mint: Signer<'info>,
+
+    /// CHECK: Must match pact.beneficiary.
+    #[account(
+        constraint = beneficiary.key() == pact.beneficiary @ PactError::Unauthorized,
+    )]
+    pub beneficiary: UncheckedAccount<'info>,
+
+    /// CHECK: Token-2022 ATA for beneficiary. Created client-side before this ix.
+    #[account(mut)]
+    pub beneficiary_pact_token: UncheckedAccount<'info>,
+
+    pub token_2022_program: Program<'info, Token2022>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ThawPactToken<'info> {
+    pub beneficiary: Signer<'info>,
+
+    #[account(
+        constraint = pact.status == PactStatus::Settled @ PactError::InvalidStatus,
+        constraint = pact.pact_mint != Pubkey::default() @ PactError::NoMintCreated,
+        has_one = beneficiary,
+    )]
+    pub pact: Account<'info, Pact>,
+
+    /// CHECK: Validated against pact.pact_mint.
+    #[account(
+        constraint = pact_mint_account.key() == pact.pact_mint @ PactError::MintMismatch,
+    )]
+    pub pact_mint_account: UncheckedAccount<'info>,
+
+    /// CHECK: Beneficiary's Token-2022 token account for the Pact mint.
+    #[account(mut)]
+    pub beneficiary_pact_token: UncheckedAccount<'info>,
+
+    pub token_2022_program: Program<'info, Token2022>,
+}
+
+#[derive(Accounts)]
+pub struct BurnPactToken<'info> {
+    /// Permanent delegate (must be issuer).
+    #[account(mut)]
+    pub delegate: Signer<'info>,
+
+    #[account(
+        constraint = (
+            pact.status == PactStatus::Recalled || pact.status == PactStatus::Disputed
+        ) @ PactError::InvalidStatus,
+        constraint = pact.pact_mint != Pubkey::default() @ PactError::NoMintCreated,
+        constraint = delegate.key() == pact.issuer @ PactError::Unauthorized,
+    )]
+    pub pact: Account<'info, Pact>,
+
+    /// CHECK: Validated against pact.pact_mint.
+    #[account(
+        mut,
+        constraint = pact_mint_account.key() == pact.pact_mint @ PactError::MintMismatch,
+    )]
+    pub pact_mint_account: UncheckedAccount<'info>,
+
+    /// CHECK: Beneficiary's Token-2022 token account.
+    #[account(mut)]
+    pub beneficiary_pact_token: UncheckedAccount<'info>,
+
+    pub token_2022_program: Program<'info, Token2022>,
+}
+
+// ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 
@@ -718,11 +1087,13 @@ pub struct Pact {
     pub memo_len: u8,                       // 1
     pub bump: u8,                           // 1
     pub vault_bump: u8,                     // 1
+    pub pact_mint: Pubkey,                  // 32 — Token-2022 mint (default = no mint)
 }
 
 impl Pact {
-    // 8 + 32*4 + 8 + 1+1+1 + 8+8+8 + 32+32 + 128 + 1+1+1 = 8 + 128 + 8 + 3 + 24 + 64 + 128 + 3 = 366
-    pub const LEN: usize = 8 + 128 + 8 + 3 + 24 + 64 + 128 + 3;
+    // 8 (discriminator) + 32*4 (keys) + 8 (amount) + 1+1+1 (counts/status) + 8+8+8 (timestamps)
+    // + 32+32 (hashes) + 128 (memo) + 1+1+1 (lens/bumps) + 32 (pact_mint) = 398
+    pub const LEN: usize = 8 + 128 + 8 + 3 + 24 + 64 + 128 + 3 + 32;
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -835,6 +1206,25 @@ pub struct PactExpiredEvent {
     pub timestamp: i64,
 }
 
+#[event]
+pub struct PactMintCreatedEvent {
+    pub pact: Pubkey,
+    pub pact_mint: Pubkey,
+    pub beneficiary: Pubkey,
+}
+
+#[event]
+pub struct PactTokenThawedEvent {
+    pub pact: Pubkey,
+    pub beneficiary: Pubkey,
+}
+
+#[event]
+pub struct PactTokenBurnedEvent {
+    pub pact: Pubkey,
+    pub burned_by: Pubkey,
+}
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
@@ -881,4 +1271,12 @@ pub enum PactError {
     MemoTooLong,
     #[msg("All conditions already met")]
     AllConditionsMet,
+    #[msg("Pact mint already created")]
+    MintAlreadyCreated,
+    #[msg("Failed to create Token-2022 mint")]
+    MintCreationFailed,
+    #[msg("No Pact mint has been created")]
+    NoMintCreated,
+    #[msg("Mint does not match Pact")]
+    MintMismatch,
 }

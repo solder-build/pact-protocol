@@ -9,10 +9,13 @@ import {
 } from "@solana/web3.js";
 import {
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
   createMint,
   createAccount,
   mintTo,
   getAccount,
+  createAssociatedTokenAccountIdempotent,
+  getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 import { assert } from "chai";
 import { BN } from "bn.js";
@@ -783,7 +786,7 @@ describe("pact-protocol", () => {
     let pactKey: PublicKey;
     let vaultKey: PublicKey;
 
-    it("allows up to 8 conditions", async () => {
+    it("allows up to 8 conditions @slow", async () => {
       [pactKey] = findPactPda(
         issuer.publicKey,
         beneficiary.publicKey,
@@ -857,6 +860,302 @@ describe("pact-protocol", () => {
       } catch (err: any) {
         assert.include(err.message, "Maximum conditions");
       }
+    });
+  });
+
+  // =========================================================================
+  // Test 6: Token-2022 Pact Mint — Happy Path (Create → Settle → Thaw)
+  // =========================================================================
+  describe("Token-2022 Pact Mint — Happy Path", () => {
+    const termsHash = makeHash("PACT-006-TOKEN22-HAPPY");
+    let pactKey: PublicKey;
+    let vaultKey: PublicKey;
+    let pactMintKeypair: Keypair;
+    let beneficiaryPactToken: PublicKey;
+
+    it("creates Pact and Token-2022 mint with DefaultFrozen + PermanentDelegate", async () => {
+      [pactKey] = findPactPda(issuer.publicKey, beneficiary.publicKey, termsHash);
+      [vaultKey] = findVaultPda(pactKey);
+
+      // Create the Pact (lock collateral)
+      await program.methods
+        .initializePact(
+          new BN(100_000),
+          new BN(EXPIRY_SECONDS),
+          termsHash,
+          Buffer.from("Token-2022 test")
+        )
+        .accounts({
+          issuer: issuer.publicKey,
+          beneficiary: beneficiary.publicKey,
+          collateralMint,
+          pact: pactKey,
+          vault: vaultKey,
+          issuerTokenAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([issuer])
+        .rpc();
+
+      // Verify pact_mint is default
+      let pact = await program.account.pact.fetch(pactKey);
+      assert.ok(pact.pactMint.equals(PublicKey.default));
+
+      // Derive beneficiary ATA address (Token-2022)
+      pactMintKeypair = Keypair.generate();
+      beneficiaryPactToken = getAssociatedTokenAddressSync(
+        pactMintKeypair.publicKey,
+        beneficiary.publicKey,
+        false,
+        TOKEN_2022_PROGRAM_ID
+      );
+
+      // Create Pact mint — instruction creates mint + ATA + mints 1 token
+      const tx = await program.methods
+        .createPactMint()
+        .accounts({
+          issuer: issuer.publicKey,
+          pact: pactKey,
+          pactMint: pactMintKeypair.publicKey,
+          beneficiary: beneficiary.publicKey,
+          beneficiaryPactToken: beneficiaryPactToken,
+          token2022Program: TOKEN_2022_PROGRAM_ID,
+          associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([issuer, pactMintKeypair])
+        .rpc();
+
+      console.log("  create_pact_mint tx:", tx);
+
+      // Verify pact_mint was stored
+      pact = await program.account.pact.fetch(pactKey);
+      assert.ok(pact.pactMint.equals(pactMintKeypair.publicKey));
+
+      // Verify beneficiary holds 1 frozen Pact token
+      const tokenAccount = await getAccount(
+        connection,
+        beneficiaryPactToken,
+        undefined,
+        TOKEN_2022_PROGRAM_ID
+      );
+      assert.equal(Number(tokenAccount.amount), 1);
+      assert.equal(tokenAccount.isFrozen, true);
+
+      console.log("  Pact Mint:", pactMintKeypair.publicKey.toBase58());
+      console.log("  Beneficiary token: FROZEN, amount=1");
+    });
+
+    it("adds condition, fulfills, settles, then thaws Pact token", async () => {
+      // Add a manual condition
+      const [conditionKey] = findConditionPda(pactKey, 0);
+      await program.methods
+        .addCondition(
+          { manual: {} },
+          makeHash("Delivery confirmed"),
+          PublicKey.default,
+          new BN(0)
+        )
+        .accounts({
+          issuer: issuer.publicKey,
+          pact: pactKey,
+          condition: conditionKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([issuer])
+        .rpc();
+
+      // Fulfill it
+      await program.methods
+        .fulfillCondition(makeHash("delivery-proof-hash"))
+        .accounts({
+          fulfiller: issuer.publicKey,
+          pact: pactKey,
+          condition: conditionKey,
+        })
+        .signers([issuer])
+        .rpc();
+
+      // Settle — release collateral to beneficiary
+      await program.methods
+        .settlePact()
+        .accounts({
+          beneficiary: beneficiary.publicKey,
+          issuer: issuer.publicKey,
+          pact: pactKey,
+          vault: vaultKey,
+          collateralMint,
+          beneficiaryTokenAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([beneficiary])
+        .rpc();
+
+      // Pact is now settled
+      let pact = await program.account.pact.fetch(pactKey);
+      assert.deepEqual(pact.status, { settled: {} });
+
+      // Thaw the Pact token — now it's transferable!
+      const tx = await program.methods
+        .thawPactToken()
+        .accounts({
+          beneficiary: beneficiary.publicKey,
+          pact: pactKey,
+          pactMintAccount: pactMintKeypair.publicKey,
+          beneficiaryPactToken: beneficiaryPactToken,
+          token2022Program: TOKEN_2022_PROGRAM_ID,
+        })
+        .signers([beneficiary])
+        .rpc();
+
+      console.log("  thaw_pact_token tx:", tx);
+
+      // Verify token is now UNFROZEN
+      const tokenAccount = await getAccount(
+        connection,
+        beneficiaryPactToken,
+        undefined,
+        TOKEN_2022_PROGRAM_ID
+      );
+      assert.equal(tokenAccount.isFrozen, false);
+      assert.equal(Number(tokenAccount.amount), 1);
+
+      console.log("  Pact token: THAWED — settlement claim is now transferable!");
+    });
+  });
+
+  // =========================================================================
+  // Test 7: Token-2022 Pact Mint — Dispute → Burn Path
+  // =========================================================================
+  describe("Token-2022 Pact Mint — Dispute + Burn", () => {
+    const termsHash = makeHash("PACT-007-TOKEN22-BURN");
+    let pactKey: PublicKey;
+    let vaultKey: PublicKey;
+    let pactMintKeypair: Keypair;
+    let beneficiaryPactToken: PublicKey;
+
+    it("creates Pact + mint, disputes, recalls, then burns token", async () => {
+      [pactKey] = findPactPda(issuer.publicKey, beneficiary.publicKey, termsHash);
+      [vaultKey] = findVaultPda(pactKey);
+
+      // Create Pact
+      await program.methods
+        .initializePact(
+          new BN(50_000),
+          new BN(EXPIRY_SECONDS),
+          termsHash,
+          Buffer.from("Burn test")
+        )
+        .accounts({
+          issuer: issuer.publicKey,
+          beneficiary: beneficiary.publicKey,
+          collateralMint,
+          pact: pactKey,
+          vault: vaultKey,
+          issuerTokenAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([issuer])
+        .rpc();
+
+      // Create Pact mint
+      pactMintKeypair = Keypair.generate();
+      beneficiaryPactToken = getAssociatedTokenAddressSync(
+        pactMintKeypair.publicKey,
+        beneficiary.publicKey,
+        false,
+        TOKEN_2022_PROGRAM_ID
+      );
+
+      await program.methods
+        .createPactMint()
+        .accounts({
+          issuer: issuer.publicKey,
+          pact: pactKey,
+          pactMint: pactMintKeypair.publicKey,
+          beneficiary: beneficiary.publicKey,
+          beneficiaryPactToken: beneficiaryPactToken,
+          token2022Program: TOKEN_2022_PROGRAM_ID,
+          associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([issuer, pactMintKeypair])
+        .rpc();
+
+      // Add condition (needed for dispute scenario)
+      const [conditionKey] = findConditionPda(pactKey, 0);
+      await program.methods
+        .addCondition(
+          { manual: {} },
+          makeHash("condition-for-burn-test"),
+          PublicKey.default,
+          new BN(0)
+        )
+        .accounts({
+          issuer: issuer.publicKey,
+          pact: pactKey,
+          condition: conditionKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([issuer])
+        .rpc();
+
+      // Dispute
+      await program.methods
+        .disputePact(makeHash("Sanctions concern"))
+        .accounts({
+          disputer: issuer.publicKey,
+          pact: pactKey,
+        })
+        .signers([issuer])
+        .rpc();
+
+      // Force recall — return collateral
+      await program.methods
+        .forceRecall()
+        .accounts({
+          delegate: issuer.publicKey,
+          pact: pactKey,
+          vault: vaultKey,
+          collateralMint,
+          issuerTokenAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([issuer])
+        .rpc();
+
+      let pact = await program.account.pact.fetch(pactKey);
+      assert.deepEqual(pact.status, { recalled: {} });
+
+      // Burn Pact token via permanent delegate
+      const tx = await program.methods
+        .burnPactToken()
+        .accounts({
+          delegate: issuer.publicKey,
+          pact: pactKey,
+          pactMintAccount: pactMintKeypair.publicKey,
+          beneficiaryPactToken: beneficiaryPactToken,
+          token2022Program: TOKEN_2022_PROGRAM_ID,
+        })
+        .signers([issuer])
+        .rpc();
+
+      console.log("  burn_pact_token tx:", tx);
+
+      // Verify token was burned (amount = 0)
+      const tokenAccount = await getAccount(
+        connection,
+        beneficiaryPactToken,
+        undefined,
+        TOKEN_2022_PROGRAM_ID
+      );
+      assert.equal(Number(tokenAccount.amount), 0);
+
+      console.log("  Pact token: BURNED by permanent delegate (sanctions enforcement)");
     });
   });
 });
