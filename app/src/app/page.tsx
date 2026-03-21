@@ -24,12 +24,12 @@ const FEATURES = [
   {
     icon: "delegate",
     title: "PermanentDelegate",
-    desc: "Issuer can burn tokens from any account. Sanctions enforcement without counterparty cooperation.",
+    desc: "Issuer retains the ability to burn tokens from any account. Enables sanctions enforcement and regulatory clawback without counterparty cooperation.",
   },
   {
     icon: "agent",
     title: "AI Agent Integration",
-    desc: "MCP server with 5 tools. Cortex agents monitor conditions, auto-fulfill, predict bottlenecks.",
+    desc: "AI agents monitor conditions in real time, auto-fulfill when criteria are met, and flag settlement bottlenecks before they cause delays.",
   },
   {
     icon: "audit",
@@ -64,8 +64,8 @@ const USE_CASES = [
   },
   {
     title: "21X Securities Settlement",
-    desc: "Settlement layer for DLT-traded securities on the EU trading venue.",
-    amount: "Regulated",
+    desc: "Conditional settlement for tokenized securities traded on the EU's first regulated DLT venue. Escrow release tied to custody verification.",
+    amount: "DLT",
   },
 ];
 
@@ -188,11 +188,11 @@ export default function LandingPage() {
               <span className="text-xs text-gray-400">
                 Live on Solana Devnet
               </span>
-              <span className="text-xs text-gray-600">|</span>
+              <span className="text-xs text-gray-500">|</span>
               <span className="text-xs text-gray-500">StableHacks 2026</span>
             </div>
 
-            <h1 className="text-5xl font-bold text-white leading-tight mb-6">
+            <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white leading-tight mb-6">
               Programmable Letters
               <br />
               of Credit on{" "}
@@ -202,8 +202,9 @@ export default function LandingPage() {
             </h1>
 
             <p className="text-lg text-gray-400 leading-relaxed mb-8 max-w-2xl">
-              Lock stablecoins. Define conditions. Auto-settle or escalate.
-              Token-2022 enforcement ensures compliance at the protocol level —
+              Institutional settlement obligations that enforce themselves.
+              Lock stablecoins in escrow, attach programmable conditions, and
+              settle automatically — with compliance enforced at the token level,
               not the application level.
             </p>
 
@@ -226,7 +227,7 @@ export default function LandingPage() {
           </div>
 
           {/* Stats strip */}
-          <div className="grid grid-cols-4 gap-4 mt-16">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-16">
             {[
               ["11", "On-Chain Instructions"],
               ["21", "Passing Tests"],
@@ -253,7 +254,7 @@ export default function LandingPage() {
             From issuance to settlement in five steps
           </p>
 
-          <div className="flex items-start justify-between gap-2">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
             {FLOW_STEPS.map((s, i) => (
               <div key={s.step} className="flex-1 relative">
                 <div className="flex flex-col items-center text-center">
@@ -269,9 +270,6 @@ export default function LandingPage() {
                     {s.desc}
                   </p>
                 </div>
-                {i < FLOW_STEPS.length - 1 && (
-                  <div className="absolute top-6 left-[56%] w-[88%] h-px bg-gradient-to-r from-accent-cyan/30 to-transparent" />
-                )}
               </div>
             ))}
           </div>
@@ -289,7 +287,7 @@ export default function LandingPage() {
             protocol level
           </p>
 
-          <div className="grid grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {FEATURES.map((f) => (
               <div
                 key={f.title}
@@ -318,7 +316,7 @@ export default function LandingPage() {
             Programmable settlement for institutional stablecoin operations
           </p>
 
-          <div className="grid grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {USE_CASES.map((uc) => (
               <div
                 key={uc.title}
@@ -346,8 +344,8 @@ export default function LandingPage() {
       {/* Token-2022 highlight */}
       <section className="py-20 border-t border-navy-800">
         <div className="max-w-6xl mx-auto px-6">
-          <div className="bg-gradient-to-br from-navy-800 to-navy-700 border border-navy-600 rounded-2xl p-10 glow-gold">
-            <div className="grid grid-cols-2 gap-10">
+          <div className="bg-gradient-to-br from-navy-800 to-navy-700 border border-navy-600 border-t-accent-gold/50 rounded-2xl p-8 md:p-10 glow-gold">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
               <div>
                 <h2 className="text-2xl font-bold text-white mb-4">
                   Token-2022 Extensions
@@ -377,8 +375,8 @@ export default function LandingPage() {
                     </div>
                     <p className="text-xs text-gray-500">
                       The issuer can burn tokens from any account at any time.
-                      Sanctions enforcement without counterparty cooperation. One
-                      transaction, no lawyers.
+                      Sanctions enforcement and regulatory clawback without
+                      counterparty cooperation — a single on-chain transaction.
                     </p>
                   </div>
                 </div>
@@ -391,12 +389,12 @@ export default function LandingPage() {
                   <p className="text-sm text-gray-400">
                     Annual letter of credit market
                   </p>
-                  <p className="text-xs text-gray-600 mt-1">Still paper-based</p>
+                  <p className="text-xs text-gray-500 mt-1">Still paper-based</p>
                   <div className="mt-6 text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-b from-red-400 to-red-600 mb-3">
                     $2.5T
                   </div>
                   <p className="text-sm text-gray-400">Trade finance gap</p>
-                  <p className="text-xs text-gray-600 mt-1">
+                  <p className="text-xs text-gray-500 mt-1">
                     ADB estimate — too slow, too expensive
                   </p>
                 </div>
@@ -410,11 +408,12 @@ export default function LandingPage() {
       <section className="py-20 border-t border-navy-800">
         <div className="max-w-6xl mx-auto px-6 text-center">
           <h2 className="text-3xl font-bold text-white mb-4">
-            Not a platform. A primitive.
+            Not a platform. A building block.
           </h2>
           <p className="text-sm text-gray-500 mb-8 max-w-xl mx-auto">
-            Any institution can issue a Pact. Any counterparty can receive one.
-            Settlement, escrow, and compliance enforced at the token level.
+            We built Pact so any institution can issue a settlement obligation
+            and any counterparty can receive one — with escrow, compliance, and
+            finality enforced at the token level.
           </p>
           <div className="flex items-center justify-center gap-4">
             <Link
@@ -438,19 +437,19 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="border-t border-navy-800 py-8">
         <div className="max-w-6xl mx-auto px-6 flex items-center justify-between">
-          <p className="text-xs text-gray-700">
+          <p className="text-xs text-gray-500">
             Pact Protocol — StableHacks 2026 | Track 3: Programmable Stablecoin
             Payments
           </p>
           <div className="flex items-center gap-4">
-            <span className="text-xs text-gray-700">
+            <span className="text-xs text-gray-500">
               Built with Anchor 0.32.1 | Token-2022 | Solana
             </span>
             <a
               href="https://solder.build"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+              className="text-xs text-gray-500 hover:text-gray-400 transition-colors"
             >
               Solder
             </a>
