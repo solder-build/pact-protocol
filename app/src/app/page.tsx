@@ -1,533 +1,461 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
 
 // ---------------------------------------------------------------------------
-// Types
+// Data
 // ---------------------------------------------------------------------------
-interface Condition {
-  index: number;
-  type: string;
-  fulfilled: boolean;
-  fulfilledBy: string | null;
-  proofHash: string | null;
-}
-
-interface Pact {
-  address: string;
-  issuer: string;
-  issuerLabel: string;
-  beneficiary: string;
-  beneficiaryLabel: string;
-  status: string;
-  collateralAmount: number;
-  conditionCount: number;
-  conditionsFulfilled: number;
-  createdAt: string;
-  expiryAt: string;
-  memo: string;
-  pactMint: string | null;
-  tokenFrozen: boolean | null;
-  conditions: Condition[];
-}
-
-// ---------------------------------------------------------------------------
-// Mock Data — matches demo script scenarios
-// ---------------------------------------------------------------------------
-const MOCK_PACTS: Pact[] = [
+const FEATURES = [
   {
-    address: "8Xk9..mQz4",
-    issuer: "47Fg..ZyfS",
-    issuerLabel: "AMINA Bank",
-    beneficiary: "9rTp..vK2j",
-    beneficiaryLabel: "Zurich Corp",
-    status: "Settled",
-    collateralAmount: 10_000_000_000,
-    conditionCount: 2,
-    conditionsFulfilled: 2,
-    createdAt: "2026-03-20T14:30:00Z",
-    expiryAt: "2026-03-27T14:30:00Z",
-    memo: "OTC USDC Settlement #001",
-    pactMint: "6FWQ..sr5R",
-    tokenFrozen: false,
-    conditions: [
-      {
-        index: 0,
-        type: "Manual",
-        fulfilled: true,
-        fulfilledBy: "AMINA Bank",
-        proofHash: "delivery-receipt-SHA256-abc123",
-      },
-      {
-        index: 1,
-        type: "Agent",
-        fulfilled: true,
-        fulfilledBy: "Cortex AI",
-        proofHash: "inspection-report-SHA256-xyz789",
-      },
-    ],
+    icon: "lock",
+    title: "PDA Escrow Vault",
+    desc: "Collateral locked in a program-derived escrow. No human custody. No counterparty risk.",
   },
   {
-    address: "3vNp..kR7w",
-    issuer: "47Fg..ZyfS",
-    issuerLabel: "AMINA Bank",
-    beneficiary: "9rTp..vK2j",
-    beneficiaryLabel: "Zurich Corp",
-    status: "Recalled",
-    collateralAmount: 5_000_000_000,
-    conditionCount: 1,
-    conditionsFulfilled: 0,
-    createdAt: "2026-03-20T15:00:00Z",
-    expiryAt: "2026-03-27T15:00:00Z",
-    memo: "Flagged counterparty test",
-    pactMint: "4jKm..pQ8t",
-    tokenFrozen: null, // burned
-    conditions: [
-      {
-        index: 0,
-        type: "Manual",
-        fulfilled: false,
-        fulfilledBy: null,
-        proofHash: null,
-      },
-    ],
+    icon: "conditions",
+    title: "5 Condition Types",
+    desc: "Manual, AI Agent, Oracle, Time-Based, Document Verification. Up to 8 per Pact.",
   },
   {
-    address: "7mWq..nT5x",
-    issuer: "47Fg..ZyfS",
-    issuerLabel: "AMINA Bank",
-    beneficiary: "2kLp..hG9r",
-    beneficiaryLabel: "Hong Kong Trading Ltd",
-    status: "Active",
-    collateralAmount: 50_000_000_000,
-    conditionCount: 3,
-    conditionsFulfilled: 1,
-    createdAt: "2026-03-20T16:00:00Z",
-    expiryAt: "2026-04-19T16:00:00Z",
-    memo: "Cross-border supply chain settlement",
-    pactMint: "2rXn..wM4k",
-    tokenFrozen: true,
-    conditions: [
-      {
-        index: 0,
-        type: "DocumentVerification",
-        fulfilled: true,
-        fulfilledBy: "Shipping Agent",
-        proofHash: "bill-of-lading-SHA256-doc001",
-      },
-      {
-        index: 1,
-        type: "Oracle",
-        fulfilled: false,
-        fulfilledBy: null,
-        proofHash: null,
-      },
-      {
-        index: 2,
-        type: "TimeBased",
-        fulfilled: false,
-        fulfilledBy: null,
-        proofHash: null,
-      },
-    ],
+    icon: "freeze",
+    title: "DefaultFrozen",
+    desc: "Pact tokens frozen at creation. Cannot transfer until settlement. Protocol-level enforcement.",
+  },
+  {
+    icon: "delegate",
+    title: "PermanentDelegate",
+    desc: "Issuer can burn tokens from any account. Sanctions enforcement without counterparty cooperation.",
+  },
+  {
+    icon: "agent",
+    title: "AI Agent Integration",
+    desc: "MCP server with 5 tools. Cortex agents monitor conditions, auto-fulfill, predict bottlenecks.",
+  },
+  {
+    icon: "audit",
+    title: "On-Chain Audit Trail",
+    desc: "Every action emits events. Reasoning hashes anchor AI decisions immutably on-chain.",
+  },
+];
+
+const FLOW_STEPS = [
+  { step: "01", label: "Lock", desc: "Issuer locks USDC in escrow vault" },
+  { step: "02", label: "Mint", desc: "Token-2022 Pact token minted (frozen)" },
+  { step: "03", label: "Conditions", desc: "Programmable conditions attached" },
+  { step: "04", label: "Fulfill", desc: "Conditions verified on-chain or by AI" },
+  { step: "05", label: "Settle", desc: "Collateral released, token thawed" },
+];
+
+const USE_CASES = [
+  {
+    title: "OTC Stablecoin Settlement",
+    desc: "Atomic delivery-vs-payment for institutional trades. No manual coordination.",
+    amount: "$500K+",
+  },
+  {
+    title: "Conditional Custody Release",
+    desc: "Programmable release based on milestones, vesting, or regulatory approvals.",
+    amount: "Any size",
+  },
+  {
+    title: "Cross-Border Payments",
+    desc: "Lock USDC, release when shipping documents verified. No correspondent bank.",
+    amount: "Minutes",
+  },
+  {
+    title: "21X Securities Settlement",
+    desc: "Settlement layer for DLT-traded securities on the EU trading venue.",
+    amount: "Regulated",
   },
 ];
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Icon components
 // ---------------------------------------------------------------------------
-function formatUsdc(amount: number): string {
-  return `$${(amount / 1_000_000).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    Active: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
-    Settled: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-    Disputed: "bg-red-500/20 text-red-400 border-red-500/30",
-    Recalled: "bg-amber-500/20 text-amber-400 border-amber-500/30",
-    Expired: "bg-gray-500/20 text-gray-400 border-gray-500/30",
+function FeatureIcon({ icon }: { icon: string }) {
+  const paths: Record<string, React.ReactNode> = {
+    lock: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.5}
+        d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
+      />
+    ),
+    conditions: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.5}
+        d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+      />
+    ),
+    freeze: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.5}
+        d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"
+      />
+    ),
+    delegate: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.5}
+        d="M9 12.75l3 3m0 0l3-3m-3 3v-7.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+      />
+    ),
+    agent: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.5}
+        d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25z"
+      />
+    ),
+    audit: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.5}
+        d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
+      />
+    ),
   };
+
   return (
-    <span
-      className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${colors[status] ?? colors.Expired}`}
+    <svg
+      className="w-6 h-6 text-accent-cyan"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
     >
-      {status}
-    </span>
-  );
-}
-
-function TokenBadge({
-  label,
-  variant,
-}: {
-  label: string;
-  variant: "cyan" | "gold" | "red" | "green";
-}) {
-  const colors = {
-    cyan: "bg-cyan-500/10 text-cyan-400 border-cyan-500/30",
-    gold: "bg-amber-500/10 text-amber-400 border-amber-500/30",
-    red: "bg-red-500/10 text-red-400 border-red-500/30",
-    green: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
-  };
-  return (
-    <span
-      className={`px-2 py-0.5 rounded text-[10px] font-mono font-medium border ${colors[variant]}`}
-    >
-      {label}
-    </span>
-  );
-}
-
-function ConditionIcon({ type }: { type: string }) {
-  const icons: Record<string, string> = {
-    Manual: "M",
-    Agent: "AI",
-    Oracle: "O",
-    TimeBased: "T",
-    DocumentVerification: "D",
-  };
-  return (
-    <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-navy-600 text-[10px] font-bold text-accent-cyan">
-      {icons[type] ?? "?"}
-    </span>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Components
-// ---------------------------------------------------------------------------
-function StatCard({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-}) {
-  return (
-    <div className="bg-navy-800 border border-navy-600 rounded-xl p-5 glow-cyan">
-      <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-        {label}
-      </p>
-      <p className="text-2xl font-bold text-white">{value}</p>
-      {sub && <p className="text-xs text-gray-500 mt-1">{sub}</p>}
-    </div>
-  );
-}
-
-function PactRow({
-  pact,
-  expanded,
-  onToggle,
-}: {
-  pact: Pact;
-  expanded: boolean;
-  onToggle: () => void;
-}) {
-  const progress =
-    pact.conditionCount > 0
-      ? (pact.conditionsFulfilled / pact.conditionCount) * 100
-      : 0;
-
-  return (
-    <>
-      <tr
-        onClick={onToggle}
-        className="border-b border-navy-700 hover:bg-navy-700/50 cursor-pointer transition-colors"
-      >
-        <td className="px-4 py-3">
-          <code className="text-xs text-accent-cyan">{pact.address}</code>
-        </td>
-        <td className="px-4 py-3">
-          <StatusBadge status={pact.status} />
-        </td>
-        <td className="px-4 py-3 text-sm font-medium text-white">
-          {formatUsdc(pact.collateralAmount)}
-        </td>
-        <td className="px-4 py-3">
-          <div className="flex items-center gap-2">
-            <div className="w-16 h-1.5 bg-navy-600 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-accent-cyan rounded-full transition-all"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <span className="text-xs text-gray-400">
-              {pact.conditionsFulfilled}/{pact.conditionCount}
-            </span>
-          </div>
-        </td>
-        <td className="px-4 py-3 text-xs text-gray-500">
-          {pact.issuerLabel}
-        </td>
-        <td className="px-4 py-3 text-xs text-gray-500">
-          {pact.beneficiaryLabel}
-        </td>
-        <td className="px-4 py-3 text-xs text-gray-500">
-          {pact.memo}
-        </td>
-        <td className="px-4 py-3 text-gray-500">
-          <svg
-            className={`w-4 h-4 transition-transform ${expanded ? "rotate-180" : ""}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M19 9l-7 7-7-7"
-            />
-          </svg>
-        </td>
-      </tr>
-      {expanded && (
-        <tr className="bg-navy-800/50">
-          <td colSpan={8} className="px-4 py-4">
-            <div className="grid grid-cols-2 gap-6">
-              {/* Conditions */}
-              <div>
-                <h4 className="text-xs uppercase tracking-wider text-gray-500 mb-3">
-                  Conditions
-                </h4>
-                <div className="space-y-2">
-                  {pact.conditions.map((c) => (
-                    <div
-                      key={c.index}
-                      className="flex items-center gap-3 bg-navy-700/50 rounded-lg px-3 py-2"
-                    >
-                      <ConditionIcon type={c.type} />
-                      <div className="flex-1">
-                        <span className="text-xs text-gray-300">
-                          {c.type}
-                        </span>
-                        {c.fulfilledBy && (
-                          <span className="text-xs text-gray-500 ml-2">
-                            by {c.fulfilledBy}
-                          </span>
-                        )}
-                      </div>
-                      {c.fulfilled ? (
-                        <span className="text-emerald-400 text-xs">
-                          Fulfilled
-                        </span>
-                      ) : (
-                        <span className="text-amber-400 text-xs">
-                          Pending
-                        </span>
-                      )}
-                      {c.proofHash && (
-                        <code className="text-[10px] text-gray-600 ml-2">
-                          {c.proofHash.slice(0, 16)}...
-                        </code>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Token-2022 */}
-              <div>
-                <h4 className="text-xs uppercase tracking-wider text-gray-500 mb-3">
-                  Token-2022 Pact Mint
-                </h4>
-                {pact.pactMint ? (
-                  <div className="bg-navy-700/50 rounded-lg px-4 py-3 space-y-3">
-                    <div>
-                      <span className="text-xs text-gray-500">Mint: </span>
-                      <code className="text-xs text-accent-gold">
-                        {pact.pactMint}
-                      </code>
-                    </div>
-                    <div className="flex gap-2 flex-wrap">
-                      <TokenBadge label="DefaultFrozen" variant="cyan" />
-                      <TokenBadge label="PermanentDelegate" variant="gold" />
-                    </div>
-                    <div>
-                      <span className="text-xs text-gray-500">
-                        Token Status:{" "}
-                      </span>
-                      {pact.tokenFrozen === null ? (
-                        <TokenBadge label="BURNED" variant="red" />
-                      ) : pact.tokenFrozen ? (
-                        <TokenBadge label="FROZEN" variant="cyan" />
-                      ) : (
-                        <TokenBadge label="THAWED" variant="green" />
-                      )}
-                    </div>
-                    <div className="text-[10px] text-gray-600 leading-relaxed">
-                      {pact.tokenFrozen === null
-                        ? "Token burned by permanent delegate — settlement claim destroyed."
-                        : pact.tokenFrozen
-                          ? "Token frozen — cannot transfer until settlement."
-                          : "Token thawed — settlement claim is transferable."}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-navy-700/50 rounded-lg px-4 py-3 text-xs text-gray-600">
-                    No Pact mint created
-                  </div>
-                )}
-              </div>
-            </div>
-          </td>
-        </tr>
-      )}
-    </>
+      {paths[icon]}
+    </svg>
   );
 }
 
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
-export default function Dashboard() {
-  const [expandedPact, setExpandedPact] = useState<string | null>(null);
-
-  const totalPacts = MOCK_PACTS.length;
-  const activePacts = MOCK_PACTS.filter((p) => p.status === "Active").length;
-  const totalCollateral = MOCK_PACTS.reduce(
-    (sum, p) => sum + (p.status === "Active" ? p.collateralAmount : 0),
-    0
-  );
-  const totalConditions = MOCK_PACTS.reduce(
-    (sum, p) => sum + p.conditionCount,
-    0
-  );
-  const fulfilledConditions = MOCK_PACTS.reduce(
-    (sum, p) => sum + p.conditionsFulfilled,
-    0
-  );
-  const fulfillmentPct =
-    totalConditions > 0
-      ? Math.round((fulfilledConditions / totalConditions) * 100)
-      : 0;
-
+export default function LandingPage() {
   return (
-    <div className="max-w-7xl mx-auto px-6 py-8">
-      {/* Header */}
-      <header className="mb-8">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-white tracking-tight">
-              Pact Protocol
-            </h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Programmable Letters of Credit on Solana
-            </p>
+    <div className="min-h-screen">
+      {/* Nav */}
+      <nav className="border-b border-navy-700/50 backdrop-blur-md sticky top-0 z-50 bg-navy-900/80">
+        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent-cyan to-blue-600 flex items-center justify-center">
+              <span className="text-white font-bold text-sm">P</span>
+            </div>
+            <span className="font-bold text-white text-lg">Pact Protocol</span>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-6">
+            <a
+              href="https://github.com/solder-build/pact-protocol"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-gray-400 hover:text-white transition-colors"
+            >
+              GitHub
+            </a>
+            <a
+              href="https://explorer.solana.com/address/CoiQFqwmZU6KYq6BjMMz3yw9sgb5L8ngusPgtRXGRHi8?cluster=devnet"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-gray-400 hover:text-white transition-colors"
+            >
+              Explorer
+            </a>
+            <Link
+              href="/dashboard"
+              className="text-sm font-medium bg-accent-cyan/10 text-accent-cyan border border-accent-cyan/30 px-4 py-2 rounded-lg hover:bg-accent-cyan/20 transition-colors"
+            >
+              Dashboard
+            </Link>
+          </div>
+        </div>
+      </nav>
+
+      {/* Hero */}
+      <section className="relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-b from-accent-cyan/5 via-transparent to-transparent" />
+        <div className="max-w-6xl mx-auto px-6 pt-24 pb-20 relative">
+          <div className="max-w-3xl">
+            <div className="inline-flex items-center gap-2 bg-navy-800 border border-navy-600 rounded-full px-4 py-1.5 mb-6">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs text-gray-500">Devnet</span>
+              <span className="text-xs text-gray-400">
+                Live on Solana Devnet
+              </span>
+              <span className="text-xs text-gray-600">|</span>
+              <span className="text-xs text-gray-500">StableHacks 2026</span>
             </div>
-            <code className="text-xs text-gray-600 bg-navy-800 px-3 py-1.5 rounded-lg border border-navy-700">
-              CoiQ..RHi8
-            </code>
-          </div>
-        </div>
-      </header>
 
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-4 mb-8">
-        <StatCard label="Total Pacts" value={String(totalPacts)} sub="All time" />
-        <StatCard
-          label="Active Pacts"
-          value={String(activePacts)}
-          sub="Currently open"
-        />
-        <StatCard
-          label="Collateral Locked"
-          value={formatUsdc(totalCollateral)}
-          sub="Active escrows"
-        />
-        <StatCard
-          label="Conditions Fulfilled"
-          value={`${fulfillmentPct}%`}
-          sub={`${fulfilledConditions} of ${totalConditions}`}
-        />
-      </div>
+            <h1 className="text-5xl font-bold text-white leading-tight mb-6">
+              Programmable Letters
+              <br />
+              of Credit on{" "}
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-accent-cyan to-blue-400">
+                Solana
+              </span>
+            </h1>
 
-      {/* Token-2022 Feature Banner */}
-      <div className="mb-8 bg-gradient-to-r from-navy-800 to-navy-700 border border-navy-600 rounded-xl p-5 glow-gold">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-white mb-1">
-              Token-2022 Extensions
-            </h3>
-            <p className="text-xs text-gray-500">
-              Every Pact token enforces compliance at the protocol level — not
-              the application level.
+            <p className="text-lg text-gray-400 leading-relaxed mb-8 max-w-2xl">
+              Lock stablecoins. Define conditions. Auto-settle or escalate.
+              Token-2022 enforcement ensures compliance at the protocol level —
+              not the application level.
             </p>
-          </div>
-          <div className="flex gap-3">
-            <div className="text-center">
-              <TokenBadge label="DefaultFrozen" variant="cyan" />
-              <p className="text-[10px] text-gray-600 mt-1">
-                Tokens frozen until settlement
-              </p>
-            </div>
-            <div className="text-center">
-              <TokenBadge label="PermanentDelegate" variant="gold" />
-              <p className="text-[10px] text-gray-600 mt-1">
-                Institutional clawback
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      {/* Pact Table */}
-      <div className="bg-navy-800 border border-navy-700 rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-navy-700">
-          <h2 className="text-sm font-semibold text-white">Pact Escrows</h2>
+            <div className="flex items-center gap-4">
+              <Link
+                href="/dashboard"
+                className="bg-accent-cyan text-navy-900 font-semibold px-6 py-3 rounded-lg hover:bg-accent-cyan/90 transition-colors"
+              >
+                View Dashboard
+              </Link>
+              <a
+                href="https://github.com/solder-build/pact-protocol"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="border border-navy-600 text-gray-300 font-medium px-6 py-3 rounded-lg hover:border-gray-500 hover:text-white transition-colors"
+              >
+                View Source
+              </a>
+            </div>
+          </div>
+
+          {/* Stats strip */}
+          <div className="grid grid-cols-4 gap-4 mt-16">
+            {[
+              ["11", "On-Chain Instructions"],
+              ["21", "Passing Tests"],
+              ["5", "Condition Types"],
+              ["2", "Token-2022 Extensions"],
+            ].map(([val, label]) => (
+              <div
+                key={label}
+                className="text-center bg-navy-800/50 border border-navy-700 rounded-xl py-4"
+              >
+                <p className="text-2xl font-bold text-accent-cyan">{val}</p>
+                <p className="text-xs text-gray-500 mt-1">{label}</p>
+              </div>
+            ))}
+          </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-navy-700 text-xs text-gray-500 uppercase tracking-wider">
-                <th className="text-left px-4 py-3 font-medium">Address</th>
-                <th className="text-left px-4 py-3 font-medium">Status</th>
-                <th className="text-left px-4 py-3 font-medium">Collateral</th>
-                <th className="text-left px-4 py-3 font-medium">Conditions</th>
-                <th className="text-left px-4 py-3 font-medium">Issuer</th>
-                <th className="text-left px-4 py-3 font-medium">Beneficiary</th>
-                <th className="text-left px-4 py-3 font-medium">Memo</th>
-                <th className="text-left px-4 py-3 font-medium w-8" />
-              </tr>
-            </thead>
-            <tbody>
-              {MOCK_PACTS.map((pact) => (
-                <PactRow
-                  key={pact.address}
-                  pact={pact}
-                  expanded={expandedPact === pact.address}
-                  onToggle={() =>
-                    setExpandedPact(
-                      expandedPact === pact.address ? null : pact.address
-                    )
-                  }
-                />
-              ))}
-            </tbody>
-          </table>
+      </section>
+
+      {/* How it works — flow */}
+      <section className="py-20 border-t border-navy-800">
+        <div className="max-w-6xl mx-auto px-6">
+          <h2 className="text-2xl font-bold text-white mb-2">How It Works</h2>
+          <p className="text-sm text-gray-500 mb-12">
+            From issuance to settlement in five steps
+          </p>
+
+          <div className="flex items-start justify-between gap-2">
+            {FLOW_STEPS.map((s, i) => (
+              <div key={s.step} className="flex-1 relative">
+                <div className="flex flex-col items-center text-center">
+                  <div className="w-12 h-12 rounded-full bg-navy-700 border border-navy-600 flex items-center justify-center mb-3">
+                    <span className="text-accent-cyan font-bold text-sm">
+                      {s.step}
+                    </span>
+                  </div>
+                  <h3 className="text-sm font-semibold text-white mb-1">
+                    {s.label}
+                  </h3>
+                  <p className="text-xs text-gray-500 leading-relaxed">
+                    {s.desc}
+                  </p>
+                </div>
+                {i < FLOW_STEPS.length - 1 && (
+                  <div className="absolute top-6 left-[56%] w-[88%] h-px bg-gradient-to-r from-accent-cyan/30 to-transparent" />
+                )}
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      </section>
+
+      {/* Features */}
+      <section className="py-20 border-t border-navy-800">
+        <div className="max-w-6xl mx-auto px-6">
+          <h2 className="text-2xl font-bold text-white mb-2">
+            Built for Institutions
+          </h2>
+          <p className="text-sm text-gray-500 mb-12">
+            Token-2022 extensions enforce compliance where it matters — at the
+            protocol level
+          </p>
+
+          <div className="grid grid-cols-3 gap-5">
+            {FEATURES.map((f) => (
+              <div
+                key={f.title}
+                className="bg-navy-800 border border-navy-700 rounded-xl p-5 hover:border-navy-600 transition-colors"
+              >
+                <div className="w-10 h-10 rounded-lg bg-accent-cyan/10 flex items-center justify-center mb-4">
+                  <FeatureIcon icon={f.icon} />
+                </div>
+                <h3 className="text-sm font-semibold text-white mb-2">
+                  {f.title}
+                </h3>
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  {f.desc}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Use Cases */}
+      <section className="py-20 border-t border-navy-800">
+        <div className="max-w-6xl mx-auto px-6">
+          <h2 className="text-2xl font-bold text-white mb-2">Use Cases</h2>
+          <p className="text-sm text-gray-500 mb-12">
+            Programmable settlement for institutional stablecoin operations
+          </p>
+
+          <div className="grid grid-cols-2 gap-5">
+            {USE_CASES.map((uc) => (
+              <div
+                key={uc.title}
+                className="bg-navy-800 border border-navy-700 rounded-xl p-6 flex items-start gap-4"
+              >
+                <div className="shrink-0 w-12 h-12 rounded-lg bg-accent-gold/10 border border-accent-gold/20 flex items-center justify-center">
+                  <span className="text-accent-gold text-xs font-bold">
+                    {uc.amount}
+                  </span>
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-white mb-1">
+                    {uc.title}
+                  </h3>
+                  <p className="text-xs text-gray-500 leading-relaxed">
+                    {uc.desc}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Token-2022 highlight */}
+      <section className="py-20 border-t border-navy-800">
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="bg-gradient-to-br from-navy-800 to-navy-700 border border-navy-600 rounded-2xl p-10 glow-gold">
+            <div className="grid grid-cols-2 gap-10">
+              <div>
+                <h2 className="text-2xl font-bold text-white mb-4">
+                  Token-2022 Extensions
+                </h2>
+                <p className="text-sm text-gray-400 leading-relaxed mb-6">
+                  Every Pact token is a Token-2022 mint with two extensions that
+                  make compliance enforcement structural — not optional.
+                </p>
+                <div className="space-y-4">
+                  <div className="bg-navy-900/50 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium border bg-cyan-500/10 text-cyan-400 border-cyan-500/30">
+                        DefaultFrozen
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      Token accounts frozen at creation. The Pact token cannot
+                      move until the program thaws it after settlement. Not a
+                      check — the token physically cannot transfer.
+                    </p>
+                  </div>
+                  <div className="bg-navy-900/50 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium border bg-amber-500/10 text-amber-400 border-amber-500/30">
+                        PermanentDelegate
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      The issuer can burn tokens from any account at any time.
+                      Sanctions enforcement without counterparty cooperation. One
+                      transaction, no lawyers.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center justify-center">
+                <div className="text-center">
+                  <div className="text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-b from-accent-gold to-amber-600 mb-3">
+                    $3T
+                  </div>
+                  <p className="text-sm text-gray-400">
+                    Annual letter of credit market
+                  </p>
+                  <p className="text-xs text-gray-600 mt-1">Still paper-based</p>
+                  <div className="mt-6 text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-b from-red-400 to-red-600 mb-3">
+                    $2.5T
+                  </div>
+                  <p className="text-sm text-gray-400">Trade finance gap</p>
+                  <p className="text-xs text-gray-600 mt-1">
+                    ADB estimate — too slow, too expensive
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* CTA */}
+      <section className="py-20 border-t border-navy-800">
+        <div className="max-w-6xl mx-auto px-6 text-center">
+          <h2 className="text-3xl font-bold text-white mb-4">
+            Not a platform. A primitive.
+          </h2>
+          <p className="text-sm text-gray-500 mb-8 max-w-xl mx-auto">
+            Any institution can issue a Pact. Any counterparty can receive one.
+            Settlement, escrow, and compliance enforced at the token level.
+          </p>
+          <div className="flex items-center justify-center gap-4">
+            <Link
+              href="/dashboard"
+              className="bg-accent-cyan text-navy-900 font-semibold px-8 py-3 rounded-lg hover:bg-accent-cyan/90 transition-colors"
+            >
+              Explore Dashboard
+            </Link>
+            <a
+              href="https://github.com/solder-build/pact-protocol"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="border border-navy-600 text-gray-300 font-medium px-8 py-3 rounded-lg hover:border-gray-500 hover:text-white transition-colors"
+            >
+              GitHub
+            </a>
+          </div>
+        </div>
+      </section>
 
       {/* Footer */}
-      <footer className="mt-8 text-center text-xs text-gray-700">
-        <p>
-          Pact Protocol — StableHacks 2026 | Track 3: Programmable Stablecoin
-          Payments
-        </p>
-        <p className="mt-1">
-          Built with Anchor 0.32.1 | Token-2022 | Solana Devnet
-        </p>
+      <footer className="border-t border-navy-800 py-8">
+        <div className="max-w-6xl mx-auto px-6 flex items-center justify-between">
+          <p className="text-xs text-gray-700">
+            Pact Protocol — StableHacks 2026 | Track 3: Programmable Stablecoin
+            Payments
+          </p>
+          <div className="flex items-center gap-4">
+            <span className="text-xs text-gray-700">
+              Built with Anchor 0.32.1 | Token-2022 | Solana
+            </span>
+            <a
+              href="https://solder.build"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+            >
+              Solder
+            </a>
+          </div>
+        </div>
       </footer>
     </div>
   );
