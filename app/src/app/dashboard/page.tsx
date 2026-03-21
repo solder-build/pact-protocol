@@ -323,7 +323,7 @@ function PactRow({
                         </span>
                       )}
                       {c.proofHash && (
-                        <code className="text-[10px] text-gray-600 ml-2">
+                        <code className="text-[10px] text-gray-500 ml-2">
                           {c.proofHash.slice(0, 16)}...
                         </code>
                       )}
@@ -361,7 +361,7 @@ function PactRow({
                         <TokenBadge label="THAWED" variant="green" />
                       )}
                     </div>
-                    <div className="text-[10px] text-gray-600 leading-relaxed">
+                    <div className="text-[10px] text-gray-500 leading-relaxed">
                       {pact.tokenFrozen === null
                         ? "Token burned by permanent delegate — settlement claim destroyed."
                         : pact.tokenFrozen
@@ -370,7 +370,7 @@ function PactRow({
                     </div>
                   </div>
                 ) : (
-                  <div className="bg-navy-700/50 rounded-lg px-4 py-3 text-xs text-gray-600">
+                  <div className="bg-navy-700/50 rounded-lg px-4 py-3 text-xs text-gray-500">
                     No Pact mint created
                   </div>
                 )}
@@ -410,31 +410,29 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
-      {/* Header */}
-      <header className="mb-8">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-white tracking-tight">
-              Pact Protocol
-            </h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Programmable Letters of Credit on Solana
-            </p>
-          </div>
+      {/* Nav */}
+      <nav className="border-b border-navy-700/50 backdrop-blur-md sticky top-0 z-50 bg-navy-900/80 -mx-6 px-6 -mt-8 mb-8">
+        <div className="h-16 flex items-center justify-between">
+          <a href="/" className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent-cyan to-blue-600 flex items-center justify-center">
+              <span className="text-white font-bold text-sm">P</span>
+            </div>
+            <span className="font-bold text-white text-lg">Pact Protocol</span>
+          </a>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs text-gray-500">Devnet</span>
+              <span className="text-xs text-gray-400">Devnet</span>
             </div>
-            <code className="text-xs text-gray-600 bg-navy-800 px-3 py-1.5 rounded-lg border border-navy-700">
+            <code className="text-xs text-gray-500 bg-navy-800 px-3 py-1.5 rounded-lg border border-navy-700">
               CoiQ..RHi8
             </code>
           </div>
         </div>
-      </header>
+      </nav>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <StatCard label="Total Pacts" value={String(totalPacts)} sub="All time" />
         <StatCard
           label="Active Pacts"
@@ -468,13 +466,13 @@ export default function Dashboard() {
           <div className="flex gap-3">
             <div className="text-center">
               <TokenBadge label="DefaultFrozen" variant="cyan" />
-              <p className="text-[10px] text-gray-600 mt-1">
+              <p className="text-[10px] text-gray-500 mt-1">
                 Tokens frozen until settlement
               </p>
             </div>
             <div className="text-center">
               <TokenBadge label="PermanentDelegate" variant="gold" />
-              <p className="text-[10px] text-gray-600 mt-1">
+              <p className="text-[10px] text-gray-500 mt-1">
                 Institutional clawback
               </p>
             </div>
@@ -520,7 +518,7 @@ export default function Dashboard() {
       </div>
 
       {/* Footer */}
-      <footer className="mt-8 text-center text-xs text-gray-700">
+      <footer className="mt-8 text-center text-xs text-gray-500">
         <p>
           Pact Protocol — StableHacks 2026 | Track 3: Programmable Stablecoin
           Payments
